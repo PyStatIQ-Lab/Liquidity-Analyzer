@@ -2,3 +2,4 @@ yfinance
 streamlit
 numpy
 matplotlib
+openpyxl
