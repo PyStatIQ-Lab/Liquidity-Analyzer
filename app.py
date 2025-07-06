@@ -3,9 +3,11 @@ import yfinance as yf
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 def analyze_liquidity_risk():
-    st.title("Stock Liquidity Risk Analysis")
+    st.title("Stock Liquidity Risk Analysis - Bulk Processing")
     
     # Load stock list
     try:
@@ -23,8 +25,10 @@ def analyze_liquidity_risk():
             st.error("Error: The selected sheet must contain a 'Symbol' column with stock tickers.")
             return
             
-        selected_stock = st.selectbox("Select a stock", stock_list['Symbol'])
-        
+        # For Indian stocks, add '.NS' suffix if not already present
+        if selected_sheet == 'NIFTY50':
+            stock_list['Symbol'] = stock_list['Symbol'].apply(lambda x: x if x.endswith('.NS') else x + '.NS')
+            
     except FileNotFoundError:
         st.error("Error: stocklist.xlsx file not found. Please make sure stocklist.xlsx exists in the same directory.")
         return
@@ -46,117 +50,122 @@ def analyze_liquidity_risk():
         st.error("Error: End date must be after start date.")
         return
     
-    # For Indian stocks, add '.NS' suffix if not already present
-    if selected_sheet == 'NIFTY50' and not selected_stock.endswith('.NS'):
-        selected_stock += '.NS'
+    # Function to fetch and analyze a single stock
+    def analyze_single_stock(symbol):
+        try:
+            stock_data = yf.download(symbol, start=start_date, end=end_date, progress=False)
+            if stock_data.empty:
+                return None
+            
+            # Calculate liquidity metrics
+            stock_data['Daily_Volume'] = stock_data['Volume']
+            stock_data['Dollar_Volume'] = stock_data['Adj Close'] * stock_data['Volume']
+            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Adj Close'] * 100
+            
+            # Calculate averages
+            avg_volume = stock_data['Daily_Volume'].mean()
+            avg_dollar_volume = stock_data['Dollar_Volume'].mean()
+            avg_spread = stock_data['Bid_Ask_Spread'].mean()
+            
+            # Calculate liquidity score
+            volume_score = np.log10(avg_volume) / 7 if avg_volume > 0 else 0
+            spread_score = 1 - (avg_spread / 10) if avg_spread > 0 else 0
+            liquidity_score = (volume_score * 0.6 + spread_score * 0.4) * 100
+            
+            return {
+                'Symbol': symbol,
+                'Avg Volume': avg_volume,
+                'Avg Dollar Volume': avg_dollar_volume,
+                'Avg Spread (%)': avg_spread,
+                'Liquidity Score': liquidity_score,
+                'Risk Level': 'High Risk' if liquidity_score < 40 else 
+                             'Medium Risk' if liquidity_score < 70 else 'Low Risk',
+                'Latest Price': stock_data['Adj Close'].iloc[-1]
+            }
+            
+        except Exception as e:
+            st.warning(f"Error analyzing {symbol}: {str(e)}")
+            return None
     
-    # Fetch stock data
-    try:
-        stock_data = yf.download(selected_stock, start=start_date, end=end_date)
-        if stock_data.empty:
-            st.error(f"No data found for {selected_stock} in the selected date range.")
+    # Analyze all stocks with progress bar
+    if st.button("Analyze All Stocks"):
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        results = []
+        
+        # Use ThreadPoolExecutor for parallel processing
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = []
+            for symbol in stock_list['Symbol']:
+                futures.append(executor.submit(analyze_single_stock, symbol))
+            
+            for i, future in enumerate(futures):
+                try:
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                except Exception as e:
+                    st.warning(f"Error processing stock: {str(e)}")
+                
+                # Update progress
+                progress = (i + 1) / len(futures)
+                progress_bar.progress(progress)
+                status_text.text(f"Processing {i+1}/{len(futures)} stocks...")
+                time.sleep(0.1)  # Small delay for UI update
+        
+        if not results:
+            st.error("No data was retrieved for any stocks. Please check your inputs.")
             return
-    except Exception as e:
-        st.error(f"Error fetching data for {selected_stock}: {str(e)}")
-        return
-    
-    # Calculate liquidity metrics
-    stock_data['Daily_Volume'] = stock_data['Volume']
-    stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']
-    stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100  # Percentage spread
-    
-    # Calculate rolling averages for smoother visualization
-    window = 14  # 2-week rolling window
-    stock_data['Rolling_Avg_Volume'] = stock_data['Daily_Volume'].rolling(window=window).mean()
-    stock_data['Rolling_Avg_Dollar_Volume'] = stock_data['Dollar_Volume'].rolling(window=window).mean()
-    stock_data['Rolling_Avg_Spread'] = stock_data['Bid_Ask_Spread'].rolling(window=window).mean()
-    
-    # Display metrics
-    st.subheader(f"Liquidity Metrics for {selected_stock}")
-    
-    # Current metrics
-    latest = stock_data.iloc[-1]
-    prev_day = stock_data.iloc[-2]
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Current Daily Volume", f"{latest['Daily_Volume']:,.0f}", 
-                 f"{(latest['Daily_Volume'] - prev_day['Daily_Volume'])/prev_day['Daily_Volume']*100:.2f}%")
-    with col2:
-        st.metric("Current Dollar Volume", f"${latest['Dollar_Volume']/1e6:,.2f}M", 
-                 f"{(latest['Dollar_Volume'] - prev_day['Dollar_Volume'])/prev_day['Dollar_Volume']*100:.2f}%")
-    with col3:
-        st.metric("Current Bid-Ask Spread", f"{latest['Bid_Ask_Spread']:.2f}%", 
-                 f"{(latest['Bid_Ask_Spread'] - prev_day['Bid_Ask_Spread']):.2f}%")
-    
-    # Liquidity score (composite metric)
-    avg_volume = stock_data['Daily_Volume'].mean()
-    avg_spread = stock_data['Bid_Ask_Spread'].mean()
-    
-    # Normalize and weight metrics (higher volume and lower spread = better liquidity)
-    volume_score = np.log10(avg_volume) / 7  # Normalize (log scale)
-    spread_score = 1 - (avg_spread / 10)     # Normalize (assuming max 10% spread)
-    
-    liquidity_score = (volume_score * 0.6 + spread_score * 0.4) * 100  # Weighted average
-    
-    st.subheader("Liquidity Risk Assessment")
-    
-    # Display liquidity score with color coding
-    if liquidity_score >= 70:
-        risk_level = "Low Risk"
-        color = "green"
-    elif liquidity_score >= 40:
-        risk_level = "Medium Risk"
-        color = "orange"
-    else:
-        risk_level = "High Risk"
-        color = "red"
-    
-    st.metric("Liquidity Score", f"{liquidity_score:.1f}/100", risk_level)
-    st.progress(int(liquidity_score))
-    
-    # Visualizations
-    st.subheader("Liquidity Trends")
-    
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12))
-    
-    # Volume plot
-    ax1.plot(stock_data.index, stock_data['Rolling_Avg_Volume'], label='14-day Avg Volume', color='blue')
-    ax1.set_ylabel('Volume')
-    ax1.set_title('Trading Volume Trend')
-    ax1.grid(True)
-    
-    # Dollar volume plot
-    ax2.plot(stock_data.index, stock_data['Rolling_Avg_Dollar_Volume']/1e6, label='14-day Avg Dollar Volume', color='green')
-    ax2.set_ylabel('Dollar Volume ($M)')
-    ax2.set_title('Dollar Volume Trend')
-    ax2.grid(True)
-    
-    # Spread plot
-    ax3.plot(stock_data.index, stock_data['Rolling_Avg_Spread'], label='14-day Avg Spread', color='red')
-    ax3.set_ylabel('Bid-Ask Spread (%)')
-    ax3.set_title('Bid-Ask Spread Trend')
-    ax3.grid(True)
-    
-    plt.tight_layout()
-    st.pyplot(fig)
-    
-    # Display raw data
-    if st.checkbox("Show raw data"):
-        st.subheader("Raw Data")
-        st.dataframe(stock_data[['Close', 'Volume', 'Daily_Volume', 'Dollar_Volume', 'Bid_Ask_Spread']].sort_index(ascending=False))
-    
-    # Interpretation
-    st.subheader("Interpretation Guide")
-    st.markdown("""
-    - **Liquidity Score**: Composite metric (0-100) combining trading volume and bid-ask spread
-        - 70-100: Low liquidity risk (easy to trade without significant price impact)
-        - 40-69: Medium liquidity risk (moderate price impact possible)
-        - 0-39: High liquidity risk (difficult to trade without moving the price)
-    - **Trading Volume**: Higher is generally better for liquidity
-    - **Dollar Volume**: Volume in dollar terms (accounts for stock price)
-    - **Bid-Ask Spread**: Lower is better (percentage difference between highest bid and lowest ask)
-    """)
+        
+        # Create results dataframe
+        results_df = pd.DataFrame(results)
+        results_df = results_df.sort_values('Liquidity Score', ascending=False)
+        
+        # Display results
+        st.subheader("Liquidity Analysis Results")
+        
+        # Color coding for risk levels
+        def color_risk(val):
+            color = 'red' if val == 'High Risk' else 'orange' if val == 'Medium Risk' else 'green'
+            return f'color: {color}'
+        
+        styled_df = results_df.style.applymap(color_risk, subset=['Risk Level'])
+        st.dataframe(styled_df.format({
+            'Avg Volume': '{:,.0f}',
+            'Avg Dollar Volume': '${:,.2f}',
+            'Avg Spread (%)': '{:.2f}%',
+            'Liquidity Score': '{:.1f}',
+            'Latest Price': '{:.2f}'
+        }))
+        
+        # Summary statistics
+        st.subheader("Summary Statistics")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Stocks Analyzed", len(results))
+        with col2:
+            st.metric("Average Liquidity Score", f"{results_df['Liquidity Score'].mean():.1f}")
+        with col3:
+            high_risk = len(results_df[results_df['Risk Level'] == 'High Risk'])
+            st.metric("High Risk Stocks", high_risk)
+        
+        # Visualization
+        st.subheader("Liquidity Score Distribution")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        results_df['Liquidity Score'].hist(bins=20, ax=ax, color='skyblue')
+        ax.set_xlabel('Liquidity Score')
+        ax.set_ylabel('Number of Stocks')
+        ax.set_title('Distribution of Liquidity Scores')
+        st.pyplot(fig)
+        
+        # Download results
+        csv = results_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Results as CSV",
+            data=csv,
+            file_name='liquidity_analysis_results.csv',
+            mime='text/csv'
+        )
 
 if __name__ == "__main__":
     analyze_liquidity_risk()
