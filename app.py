@@ -57,10 +57,10 @@ def analyze_liquidity_risk():
             if stock_data.empty:
                 return None
             
-            # Calculate liquidity metrics
+            # Calculate liquidity metrics using Close instead of Adj Close
             stock_data['Daily_Volume'] = stock_data['Volume']
-            stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']
-            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100
+            stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']  # Changed to Close
+            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100  # Changed to Close
             
             # Calculate averages
             avg_volume = stock_data['Daily_Volume'].mean()
@@ -80,7 +80,7 @@ def analyze_liquidity_risk():
                 'Liquidity Score': liquidity_score,
                 'Risk Level': 'High Risk' if liquidity_score < 40 else 
                              'Medium Risk' if liquidity_score < 70 else 'Low Risk',
-                'Latest Price': stock_data['Close'].iloc[-1]
+                'Latest Price': stock_data['Close'].iloc[-1]  # Changed to Close
             }
             
         except Exception as e:
@@ -124,19 +124,21 @@ def analyze_liquidity_risk():
         # Display results
         st.subheader("Liquidity Analysis Results")
         
+        # Format the dataframe before styling
+        formatted_df = results_df.copy()
+        formatted_df['Avg Volume'] = formatted_df['Avg Volume'].apply(lambda x: f"{x:,.0f}")
+        formatted_df['Avg Dollar Volume'] = formatted_df['Avg Dollar Volume'].apply(lambda x: f"${x:,.2f}")
+        formatted_df['Avg Spread (%)'] = formatted_df['Avg Spread (%)'].apply(lambda x: f"{x:.2f}%")
+        formatted_df['Liquidity Score'] = formatted_df['Liquidity Score'].apply(lambda x: f"{x:.1f}")
+        formatted_df['Latest Price'] = formatted_df['Latest Price'].apply(lambda x: f"{x:.2f}")
+        
         # Color coding for risk levels
         def color_risk(val):
             color = 'red' if val == 'High Risk' else 'orange' if val == 'Medium Risk' else 'green'
             return f'color: {color}'
         
-        styled_df = results_df.style.applymap(color_risk, subset=['Risk Level'])
-        st.dataframe(styled_df.format({
-            'Avg Volume': '{:,.0f}',
-            'Avg Dollar Volume': '${:,.2f}',
-            'Avg Spread (%)': '{:.2f}%',
-            'Liquidity Score': '{:.1f}',
-            'Latest Price': '{:.2f}'
-        }))
+        styled_df = formatted_df.style.applymap(color_risk, subset=['Risk Level'])
+        st.dataframe(styled_df)
         
         # Summary statistics
         st.subheader("Summary Statistics")
