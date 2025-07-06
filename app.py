@@ -62,8 +62,8 @@ def analyze_liquidity_risk():
     
     # Calculate liquidity metrics
     stock_data['Daily_Volume'] = stock_data['Volume']
-    stock_data['Dollar_Volume'] = stock_data['Adj Close'] * stock_data['Volume']
-    stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Adj Close'] * 100  # Percentage spread
+    stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']
+    stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100  # Percentage spread
     
     # Calculate rolling averages for smoother visualization
     window = 14  # 2-week rolling window
@@ -144,7 +144,7 @@ def analyze_liquidity_risk():
     # Display raw data
     if st.checkbox("Show raw data"):
         st.subheader("Raw Data")
-        st.dataframe(stock_data[['Adj Close', 'Volume', 'Daily_Volume', 'Dollar_Volume', 'Bid_Ask_Spread']].sort_index(ascending=False))
+        st.dataframe(stock_data[['Close', 'Volume', 'Daily_Volume', 'Dollar_Volume', 'Bid_Ask_Spread']].sort_index(ascending=False))
     
     # Interpretation
     st.subheader("Interpretation Guide")
