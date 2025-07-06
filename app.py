@@ -59,8 +59,8 @@ def analyze_liquidity_risk():
             
             # Calculate liquidity metrics using Close instead of Adj Close
             stock_data['Daily_Volume'] = stock_data['Volume']
-            stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']  # Changed to Close
-            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100  # Changed to Close
+            stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']
+            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100
             
             # Calculate averages
             avg_volume = stock_data['Daily_Volume'].mean()
@@ -72,6 +72,8 @@ def analyze_liquidity_risk():
             spread_score = 1 - (avg_spread / 10) if avg_spread > 0 else 0
             liquidity_score = (volume_score * 0.6 + spread_score * 0.4) * 100
             
+            latest_price = stock_data['Close'].iloc[-1] if not pd.isna(stock_data['Close'].iloc[-1]) else None
+            
             return {
                 'Symbol': symbol,
                 'Avg Volume': avg_volume,
@@ -80,7 +82,7 @@ def analyze_liquidity_risk():
                 'Liquidity Score': liquidity_score,
                 'Risk Level': 'High Risk' if liquidity_score < 40 else 
                              'Medium Risk' if liquidity_score < 70 else 'Low Risk',
-                'Latest Price': stock_data['Close'].iloc[-1]  # Changed to Close
+                'Latest Price': latest_price
             }
             
         except Exception as e:
@@ -111,7 +113,7 @@ def analyze_liquidity_risk():
                 progress = (i + 1) / len(futures)
                 progress_bar.progress(progress)
                 status_text.text(f"Processing {i+1}/{len(futures)} stocks...")
-                time.sleep(0.1)  # Small delay for UI update
+                time.sleep(0.1)
         
         if not results:
             st.error("No data was retrieved for any stocks. Please check your inputs.")
@@ -124,20 +126,28 @@ def analyze_liquidity_risk():
         # Display results
         st.subheader("Liquidity Analysis Results")
         
-        # Format the dataframe before styling
-        formatted_df = results_df.copy()
-        formatted_df['Avg Volume'] = formatted_df['Avg Volume'].apply(lambda x: f"{x:,.0f}")
-        formatted_df['Avg Dollar Volume'] = formatted_df['Avg Dollar Volume'].apply(lambda x: f"${x:,.2f}")
-        formatted_df['Avg Spread (%)'] = formatted_df['Avg Spread (%)'].apply(lambda x: f"{x:.2f}%")
-        formatted_df['Liquidity Score'] = formatted_df['Liquidity Score'].apply(lambda x: f"{x:.1f}")
-        formatted_df['Latest Price'] = formatted_df['Latest Price'].apply(lambda x: f"{x:.2f}")
+        # Create a copy for display purposes
+        display_df = results_df.copy()
+        
+        # Format numeric columns safely
+        def safe_format(x, fmt):
+            try:
+                return fmt.format(x) if x is not None and not pd.isna(x) else "N/A"
+            except:
+                return "N/A"
+        
+        display_df['Avg Volume'] = display_df['Avg Volume'].apply(lambda x: safe_format(x, "{:,.0f}"))
+        display_df['Avg Dollar Volume'] = display_df['Avg Dollar Volume'].apply(lambda x: safe_format(x, "${:,.2f}"))
+        display_df['Avg Spread (%)'] = display_df['Avg Spread (%)'].apply(lambda x: safe_format(x, "{:.2f}%"))
+        display_df['Liquidity Score'] = display_df['Liquidity Score'].apply(lambda x: safe_format(x, "{:.1f}"))
+        display_df['Latest Price'] = display_df['Latest Price'].apply(lambda x: safe_format(x, "{:.2f}"))
         
         # Color coding for risk levels
         def color_risk(val):
             color = 'red' if val == 'High Risk' else 'orange' if val == 'Medium Risk' else 'green'
             return f'color: {color}'
         
-        styled_df = formatted_df.style.applymap(color_risk, subset=['Risk Level'])
+        styled_df = display_df.style.applymap(color_risk, subset=['Risk Level'])
         st.dataframe(styled_df)
         
         # Summary statistics
@@ -146,21 +156,26 @@ def analyze_liquidity_risk():
         with col1:
             st.metric("Total Stocks Analyzed", len(results))
         with col2:
-            st.metric("Average Liquidity Score", f"{results_df['Liquidity Score'].mean():.1f}")
+            avg_score = results_df['Liquidity Score'].mean()
+            st.metric("Average Liquidity Score", f"{avg_score:.1f}" if not pd.isna(avg_score) else "N/A")
         with col3:
             high_risk = len(results_df[results_df['Risk Level'] == 'High Risk'])
             st.metric("High Risk Stocks", high_risk)
         
-        # Visualization
-        st.subheader("Liquidity Score Distribution")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        results_df['Liquidity Score'].hist(bins=20, ax=ax, color='skyblue')
-        ax.set_xlabel('Liquidity Score')
-        ax.set_ylabel('Number of Stocks')
-        ax.set_title('Distribution of Liquidity Scores')
-        st.pyplot(fig)
+        # Visualization (exclude NA values)
+        plot_df = results_df.dropna(subset=['Liquidity Score'])
+        if not plot_df.empty:
+            st.subheader("Liquidity Score Distribution")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            plot_df['Liquidity Score'].hist(bins=20, ax=ax, color='skyblue')
+            ax.set_xlabel('Liquidity Score')
+            ax.set_ylabel('Number of Stocks')
+            ax.set_title('Distribution of Liquidity Scores')
+            st.pyplot(fig)
+        else:
+            st.warning("No valid data available for visualization")
         
-        # Download results
+        # Download results (original data without formatting)
         csv = results_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download Results as CSV",
