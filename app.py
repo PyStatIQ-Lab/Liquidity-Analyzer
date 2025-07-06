@@ -59,8 +59,8 @@ def analyze_liquidity_risk():
             
             # Calculate liquidity metrics
             stock_data['Daily_Volume'] = stock_data['Volume']
-            stock_data['Dollar_Volume'] = stock_data['Adj Close'] * stock_data['Volume']
-            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Adj Close'] * 100
+            stock_data['Dollar_Volume'] = stock_data['Close'] * stock_data['Volume']
+            stock_data['Bid_Ask_Spread'] = (stock_data['High'] - stock_data['Low']) / stock_data['Close'] * 100
             
             # Calculate averages
             avg_volume = stock_data['Daily_Volume'].mean()
@@ -80,7 +80,7 @@ def analyze_liquidity_risk():
                 'Liquidity Score': liquidity_score,
                 'Risk Level': 'High Risk' if liquidity_score < 40 else 
                              'Medium Risk' if liquidity_score < 70 else 'Low Risk',
-                'Latest Price': stock_data['Adj Close'].iloc[-1]
+                'Latest Price': stock_data['Close'].iloc[-1]
             }
             
         except Exception as e:
