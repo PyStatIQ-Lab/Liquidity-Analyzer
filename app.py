@@ -9,10 +9,27 @@ def analyze_liquidity_risk():
     
     # Load stock list
     try:
-        stock_sheets = pd.ExcelFile('stocklist.xlsx').sheet_names
-        selected_stock = st.selectbox("Select a stock", stock_sheets)
+        excel_file = pd.ExcelFile('stocklist.xlsx')
+        
+        # Get all sheet names
+        sheet_names = excel_file.sheet_names
+        selected_sheet = st.selectbox("Select a sheet", sheet_names)
+        
+        # Read the selected sheet
+        stock_list = excel_file.parse(selected_sheet)
+        
+        # Assuming the sheet has a column named 'Symbol' containing stock tickers
+        if 'Symbol' not in stock_list.columns:
+            st.error("Error: The selected sheet must contain a 'Symbol' column with stock tickers.")
+            return
+            
+        selected_stock = st.selectbox("Select a stock", stock_list['Symbol'])
+        
     except FileNotFoundError:
         st.error("Error: stocklist.xlsx file not found. Please make sure stocklist.xlsx exists in the same directory.")
+        return
+    except Exception as e:
+        st.error(f"Error reading Excel file: {str(e)}")
         return
     
     # Date range selection
@@ -28,6 +45,10 @@ def analyze_liquidity_risk():
     if start_date >= end_date:
         st.error("Error: End date must be after start date.")
         return
+    
+    # For Indian stocks, add '.NS' suffix if not already present
+    if selected_sheet == 'NIFTY50' and not selected_stock.endswith('.NS'):
+        selected_stock += '.NS'
     
     # Fetch stock data
     try:
